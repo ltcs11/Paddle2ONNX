@@ -24,28 +24,20 @@ tar xf quantized_models.tar.gz
 
 cases=`find . -name "test*.py" | sort`
 ignore="test_expand_as.py \
-        test_auto_scan_quantize_linear.py \
-        test_auto_scan_dequantize_linear.py \
         test_split.py \
         test_auto_scan_softmax_with_cross_entropy.py \
         test_auto_scan_pool_adaptive_max_ops.py \
-        test_auto_scan_top_k.py \
-        test_auto_scan_group_norm.py \
-        test_auto_scan_index_select.py \
         test_auto_scan_interpolate_v1_ops.py \
         test_auto_scan_isx_ops.py \
-        test_auto_scan_linspace.py \
         test_auto_scan_masked_select.py \
         test_auto_scan_mv.py \
         test_auto_scan_pad2d.py \
-        test_auto_scan_pixel_shuffle.py \
         test_auto_scan_roll.py \
         test_auto_scan_set_value.py \
         test_auto_scan_top_k.py \
         test_auto_scan_unfold.py \
         test_auto_scan_uniform_random_batch_size_like.py \
         test_auto_scan_uniform_random.py \
-        test_auto_scan_unique.py \
         test_auto_scan_dist.py \
         test_auto_scan_distribute_fpn_proposals1.py \
         ./test_auto_scan_generate_proposals.py \
@@ -53,7 +45,6 @@ ignore="test_expand_as.py \
         test_ceil.py \
         test_floor_divide.py \
         test_has_nan.py \
-        test_index_select.py \
         test_isfinite.py \
         test_isinf.py \
         test_isnan.py \
@@ -63,11 +54,9 @@ ignore="test_expand_as.py \
         test_nn_Conv3DTranspose.py \
         test_nn_GroupNorm.py \
         test_nn_InstanceNorm3D.py \
-        test_nn_PixelShuffle.py \
         test_nn_Upsample.py \
         test_normalize.py \
         test_scatter_nd_add.py \
-        test_unique.py \
         test_unsqueeze.py"
 bug=0
 export PY_CMD=$1

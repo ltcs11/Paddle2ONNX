@@ -15,9 +15,9 @@
 #include "paddle2onnx/mapper/tensor/top_k_v2.h"
 
 namespace paddle2onnx {
-REGISTER_MAPPER(top_k_v2, TopKMapper)
+REGISTER_MAPPER(top_k_v2, TopKV2Mapper)
 
-void TopKMapper::Opset7() {
+void TopKV2Mapper::Opset11() {
   auto x_info = GetInput("X");
   auto output_info = GetOutput("Out");
   auto indices_info = GetOutput("Indices");

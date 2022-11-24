@@ -21,20 +21,16 @@ namespace paddle2onnx {
 REGISTER_MAPPER(concat, ConcatMapper)
 
 int32_t ConcatMapper::GetMinOpset(bool verbose) {
-  if (HasInput("AxisTensor")) {
-    if (!IsConstantInput("AxisTensor")) {
-      Error() << "While AxisTensor as input exists, it's not supported unless "
-                 "it's a constant tensor."
-              << std::endl;
-      return -1;
-    }
-  } else if (IsAttrVar("axis")) {
-    if (!IsConstant(GetAttrVar("axis")[0])) {
-      Error() << "While Attribute(axis)'s type is Tensor, it's not supported "
-                 "unless it's a constant tensor."
-              << std::endl;
-      return -1;
-    }
+  if (HasInput("AxisTensor") && !IsConstantInput("AxisTensor")) {
+    Error() << "While AxisTensor as input exists, it's not supported unless "
+               "it's a constant tensor."
+            << std::endl;
+    return -1;
+  } else if (IsAttrVar("axis") && !IsConstant(GetAttrVar("axis")[0])) {
+    Error() << "While Attribute(axis)'s type is Tensor, it's not supported "
+               "unless it's a constant tensor."
+            << std::endl;
+    return -1;
   }
   return 7;
 }
@@ -54,7 +50,7 @@ void ConcatMapper::Opset7() {
   };
 
   bool has_axis_tensor_input = HasInput("AxisTensor");
-  std::cout << has_axis_tensor_input << std::endl;
+
   int64_t axis = axis_;
   // NOTE(Aurelius84): we need to deprecate this branch in the future.
   if (has_axis_tensor_input) {

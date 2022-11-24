@@ -267,6 +267,10 @@ std::string OnnxHelper::Constant(const std::string& output,
   int numel = value.size();
   tensor->add_dims(numel);
   tensor->set_data_type(dtype);
+  if (value.size() == 0) {
+    nodes.push_back(node);
+    return output;
+  }
   if (dtype == ONNX_NAMESPACE::TensorProto::FLOAT) {
     std::vector<float> data;
     for (auto& item : value) {
@@ -526,12 +530,12 @@ bool OnnxHelper::TryGetTensorValue(const std::string& name,
             value->assign(val.begin(), val.end());
             return true;
           } else if (dtype == ONNX_NAMESPACE::TensorProto::FLOAT) {
-            std::vector<int32_t> val(nums, 0);
+            std::vector<float> val(nums, 0);
             memcpy(val.data(), tensor->raw_data().data(), nums * sizeof(float));
             value->assign(val.begin(), val.end());
             return true;
           } else if (dtype == ONNX_NAMESPACE::TensorProto::DOUBLE) {
-            std::vector<int32_t> val(nums, 0);
+            std::vector<double> val(nums, 0);
             memcpy(val.data(), tensor->raw_data().data(),
                    nums * sizeof(double));
             value->assign(val.begin(), val.end());

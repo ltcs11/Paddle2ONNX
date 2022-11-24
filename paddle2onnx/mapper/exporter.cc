@@ -13,7 +13,10 @@
 // limitations under the License.
 
 #include "paddle2onnx/mapper/exporter.h"
+
+#include <google/protobuf/message.h>
 #include <onnx/checker.h>
+
 #include <array>
 
 #include "onnxoptimizer/optimize.h"
@@ -85,6 +88,7 @@ void ModelExporter::ExportOp(const PaddleParser& parser, OnnxHelper* helper,
 
   auto mapper = MapperHelper::Get()->CreateMapper(op.type(), parser, helper,
                                                   block_id, op_id);
+  mapper->deploy_backend = _deploy_backend;
 #ifdef PADDLE2ONNX_DEBUG
   P2OLogger(true) << "Mapper Name: " << mapper->Name() << std::endl;
 #endif
@@ -107,7 +111,8 @@ void ModelExporter::ProcessGraphDumplicateNames(
     std::vector<std::shared_ptr<ONNX_NAMESPACE::NodeProto>>* parameters,
     std::vector<std::shared_ptr<ONNX_NAMESPACE::ValueInfoProto>>* inputs,
     std::vector<std::shared_ptr<ONNX_NAMESPACE::ValueInfoProto>>* outputs,
-    std::vector<std::shared_ptr<ONNX_NAMESPACE::NodeProto>>* nodes) {
+    std::vector<std::shared_ptr<ONNX_NAMESPACE::NodeProto>>* nodes,
+    std::map<std::string, QuantizeInfo>* quantize_info) {
   // process dumplicate tensor names
   std::map<std::string, std::string> renamer;
   std::set<std::string> tensor_names;
@@ -121,8 +126,8 @@ void ModelExporter::ProcessGraphDumplicateNames(
   }
   for (auto& item : *inputs) {
     if (tensor_names.find(item->name()) != tensor_names.end()) {
-      Assert(false,
-             "There's dumplicate names in exported parameters and inputs.");
+      Assert(false, "There's dumplicate names:" + item->name() +
+                        " in exported parameters and inputs.");
     }
     tensor_names.insert(item->name());
   }
@@ -150,6 +155,11 @@ void ModelExporter::ProcessGraphDumplicateNames(
         P2OLogger() << "Find dumplicate output name '" << renamed_tensor_name
                     << "', it will rename to '" << new_tensor_name << "'."
                     << std::endl;
+        if (quantize_info &&
+            quantize_info->find(renamed_tensor_name) != quantize_info->end()) {
+          (*quantize_info)[new_tensor_name] =
+              (*quantize_info)[renamed_tensor_name];
+        }
         *(item->mutable_output(i)) = new_tensor_name;
         renamer[renamed_tensor_name] = new_tensor_name;
       }
@@ -168,12 +178,81 @@ void ModelExporter::ProcessGraphDumplicateNames(
   }
 }
 
-std::string ModelExporter::Run(const PaddleParser& parser, int opset_version,
-                               bool auto_upgrade_opset, bool verbose,
-                               bool enable_onnx_checker,
-                               bool enable_experimental_op,
-                               bool enable_optimize,
-                               const std::string& deploy_backend) {
+void ModelExporter::SaveExternalData(::paddle2onnx::GraphProto* graph,
+                                     const std::string& external_file_path,
+                                     bool* save_external) {
+  P2OLogger() << "The exported ONNX model is bigger than 2G, external data "
+                 "will save to file: "
+              << external_file_path << std::endl;
+  std::string file_name = GetFilenameFromPath(external_file_path);
+  if (save_external) {
+    *save_external = true;
+  }
+  std::fstream f(external_file_path, std::ios::out);
+  Assert(f.is_open(), "Failed to open: " + external_file_path +
+                          " file to save external data");
+  for (auto index = 0; index < graph->node_size(); index++) {
+    auto node = graph->mutable_node(index);
+    if (node->op_type() != "Constant") {
+      continue;
+    }
+    for (auto i = 0; i < node->attribute_size(); i++) {
+      auto attr = node->mutable_attribute(i);
+      if (attr->name() != "value") {
+        continue;
+      }
+      auto tensor = attr->mutable_t();
+
+      if (tensor->raw_data().size() <= 128) {
+        continue;
+      }
+
+      tensor->set_data_location(TensorProto::EXTERNAL);
+      auto external_data = tensor->add_external_data();
+      external_data->set_key("location");
+      external_data->set_value(file_name);
+
+      external_data = tensor->add_external_data();
+      external_data->set_key("offset");
+      f.seekg(0, std::ios::end);
+      int64_t offset = f.tellg();
+      external_data->set_value(std::to_string(offset));
+      auto raw_data = tensor->raw_data();
+      f << raw_data;
+      external_data = tensor->add_external_data();
+      external_data->set_key("length");
+      int64_t raw_datas_size = raw_data.size();
+      external_data->set_value(std::to_string(raw_datas_size));
+      tensor->clear_raw_data();
+    }
+  }
+  f.close();
+}
+void ModelExporter::ONNXChecker(const ONNX_NAMESPACE::ModelProto& model,
+                                const bool& verbose) {
+  // TODO(jiangjiajun)
+  // If we need to integrate with framework
+  // this check will return a information
+  // to let framework know the conversion is
+  // pass or fail
+  try {
+    // ONNX_NAMESPACE::checker::check_model(*(model.get()));
+    ONNX_NAMESPACE::checker::check_model(model);
+  } catch (const std::exception& e) {
+    P2OLogger(verbose) << "The exported ONNX model is invalid." << std::endl;
+    P2OLogger(verbose) << "Model checker error log: " << e.what() << std::endl;
+  }
+  P2OLogger(verbose) << "PaddlePaddle model is exported as ONNX format now."
+                     << std::endl;
+}
+
+std::string ModelExporter::Run(
+    const PaddleParser& parser, int opset_version, bool auto_upgrade_opset,
+    bool verbose, bool enable_onnx_checker, bool enable_experimental_op,
+    bool enable_optimize, const std::string& deploy_backend,
+    std::string* calibration_cache, const std::string& external_file,
+    bool* save_external) {
+  _deploy_backend = deploy_backend;
   _helper.SetOpsetVersion(opset_version);
   _total_ops_num = 0;
   _current_exported_num = 0;
@@ -233,7 +312,7 @@ std::string ModelExporter::Run(const PaddleParser& parser, int opset_version,
   }
   _helper.SetOpsetVersion(opset_version);
   P2OLogger(verbose) << "Use opset_version = " << _helper.GetOpsetVersion()
-              << " for ONNX export." << std::endl;
+                     << " for ONNX export." << std::endl;
   ExportParameters(parser.params);
   ExportInputOutputs(parser.inputs, parser.outputs);
 
@@ -258,15 +337,18 @@ std::string ModelExporter::Run(const PaddleParser& parser, int opset_version,
   auto opset_id = model->add_opset_import();
   opset_id->set_domain("");
   opset_id->set_version(opset_version);
-  auto opset_paddle_id = model->add_opset_import();
-  opset_paddle_id->set_domain("Paddle");
-  opset_paddle_id->set_version(1);
+  if (custom_ops.size()) {
+    auto opset_paddle_id = model->add_opset_import();
+    opset_paddle_id->set_domain("Paddle");
+    opset_paddle_id->set_version(1);
+  }
 
-  ProcessGraphDumplicateNames(&parameters, &inputs, &outputs, &_helper.nodes);
+  ProcessGraphDumplicateNames(&parameters, &inputs, &outputs, &_helper.nodes,
+                              &_helper.quantize_info);
   if (parser.is_quantized_model) {
     quantize_model_processer.ProcessQuantizeModel(
         &parameters, &inputs, &outputs, &_helper.nodes, &_helper,
-        deploy_backend, parser);
+        deploy_backend, parser, calibration_cache);
     // Update int8 weights in quantized OP to float32
     UpdateParameters(_helper.updated_params);
   }
@@ -288,25 +370,25 @@ std::string ModelExporter::Run(const PaddleParser& parser, int opset_version,
     *(graph->add_value_info()) = (*item.get());
   }
 
-  // TODO(jiangjiajun)
-  // If we need to integrate with framework
-  // this check will return a information
-  // to let framework know the conversion is
-  // pass or fail
-  if (enable_onnx_checker) {
-    try {
-      ONNX_NAMESPACE::checker::check_model(*(model.get()));
-    } catch (...) {
-      P2OLogger(verbose) << "The exported ONNX model is invalid." << std::endl;
-      return "";
+  std::string external_data_file;
+  if (model->ByteSizeLong() > INT_MAX) {
+    if (external_file.empty()) {
+      external_data_file = "external_data";
+    } else {
+      external_data_file = external_file;
     }
-    P2OLogger(verbose) << "PaddlePaddle model is exported as ONNX format now."
-                << std::endl;
   }
 
   std::string out;
   if (enable_optimize) {
-    auto const opt_model = Optimize(*(model.get()));
+    auto opt_model = Optimize(*(model.get()));
+    if (external_data_file.size()) {
+      SaveExternalData(opt_model.mutable_graph(), external_data_file,
+                       save_external);
+    }
+    if (enable_onnx_checker) {
+      ONNXChecker(opt_model, verbose);
+    }
     if (!opt_model.SerializeToString(&out)) {
       P2OLogger(verbose)
           << "Error happenedd while optimizing the exported ONNX model."
@@ -314,6 +396,12 @@ std::string ModelExporter::Run(const PaddleParser& parser, int opset_version,
       return "";
     }
   } else {
+    if (external_data_file.size()) {
+      SaveExternalData(graph, external_data_file, save_external);
+    }
+    if (enable_onnx_checker) {
+      ONNXChecker(*(model.get()), verbose);
+    }
     if (!model->SerializeToString(&out)) {
       P2OLogger(verbose)
           << "Error happened while optimizing the exported ONNX model."
@@ -381,6 +469,10 @@ int32_t ModelExporter::GetMinOpset(const PaddleParser& parser, bool verbose) {
       } else {
         auto mapper = MapperHelper::Get()->CreateMapper(op.type(), parser,
                                                         &_helper, i, j);
+        auto iter = custom_ops.find(op.type());
+        if (iter != custom_ops.end()) {
+          mapper->export_as_custom_op = true;
+        }
         current_min_opset = mapper->GetMinOpset(verbose);
         delete mapper;
       }

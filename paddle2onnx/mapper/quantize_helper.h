@@ -14,8 +14,10 @@
 
 #pragma once
 #include <onnx/onnx_pb.h>
+
 #include <cmath>
 #include <fstream>
+#include <iomanip>
 
 #include "paddle2onnx/mapper/mapper.h"
 #include "paddle2onnx/parser/parser.h"
@@ -50,7 +52,7 @@ struct QuantizeModelProcessor {
       std::vector<std::shared_ptr<ONNX_NAMESPACE::ValueInfoProto>>* outputs,
       std::vector<std::shared_ptr<ONNX_NAMESPACE::NodeProto>>* nodes,
       OnnxHelper* helper, const std::string& deploy_backend,
-      const PaddleParser& parser);
+      const PaddleParser& parser, std::string* calibration_cache = nullptr);
 
   // Remove all Quantize and Dequantize ops
   void RemoveAllQuantizeOps();
@@ -65,13 +67,25 @@ struct QuantizeModelProcessor {
   void AppendQuantizeTensor(const std::string& tensor,
                             const bool& only_dequantize = false);
 
-  // According to:
+  // Add QDQ for ORT according to:
   // https://github.com/microsoft/onnxruntime/blob/master/onnxruntime/core/optimizer/qdq_transformer/selectors_actions/qdq_selector_action_transformer.cc
-  void AddQDQ();
+  void AddQDQForORT();
 
-  // According to:
+  // Determine if the tensor is directly linked to the output by identity
+  bool ConnectToOutput(const std::string& output_name);
+
+  // Generate cache file for TensorRT8.X int8 deploy
+  void GenerateCache(std::string* calibration_cache);
+
+  // Add QDQ for TRT according to:
   // https://github.com/NVIDIA/TensorRT/tree/main/tools/pytorch-quantization/pytorch_quantization/nn/modules
   void AddTrtQDQ();
+
+  // Add QDQ for RKNN
+  void AddQDQForRKNN();
+
+  // Add quantize related op in model according to tensor names
+  void AddQDQInModel(const std::vector<std::string>& tensors_to_be_quantize);
 
   void QuantizeInfoBroadcast();
 
@@ -81,6 +95,7 @@ struct QuantizeModelProcessor {
   // merge conv + BN
   void MergeConvBN();
 
+  // Determine whether a tensor is an output
   bool IsGraphOutput(const std::string& name);
 
   // Because processing the quantize model will add new nodes, which will

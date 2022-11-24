@@ -82,8 +82,14 @@ def arg_parser():
         "-d",
         type=_text_type,
         default="onnxruntime",
-        choices=["onnxruntime", "tensorrt", "others"],
+        choices=["onnxruntime", "tensorrt", "rknn", "others"],
         help="Quantize model deploy backend, default onnxruntime.")
+    parser.add_argument(
+        "--save_calibration_file",
+        type=_text_type,
+        default="calibration.cache",
+        help="The calibration cache for TensorRT deploy, default calibration.cache."
+    )
     parser.add_argument(
         "--enable_onnx_checker",
         type=ast.literal_eval,
@@ -113,6 +119,11 @@ def arg_parser():
         type=ast.literal_eval,
         default=True,
         help="whether enable auto_update_opset, default is True")
+    parser.add_argument(
+        "--external_filename",
+        type=_text_type,
+        default=None,
+        help="The filename of external_data when the model is bigger than 2G.")
     return parser
 
 
@@ -125,12 +136,14 @@ def c_paddle_to_onnx(model_file,
                      enable_onnx_checker=True,
                      enable_experimental_op=True,
                      enable_optimize=True,
-                     deploy_backend="onnxruntime"):
+                     deploy_backend="onnxruntime",
+                     calibration_file="",
+                     external_file=""):
     import paddle2onnx.paddle2onnx_cpp2py_export as c_p2o
-    onnx_model_str = c_p2o.export(model_file, params_file, opset_version,
-                                  auto_upgrade_opset, verbose,
-                                  enable_onnx_checker, enable_experimental_op,
-                                  enable_optimize, {}, deploy_backend)
+    onnx_model_str = c_p2o.export(
+        model_file, params_file, opset_version, auto_upgrade_opset, verbose,
+        enable_onnx_checker, enable_experimental_op, enable_optimize, {},
+        deploy_backend, calibration_file, external_file)
     if save_file is not None:
         with open(save_file, "wb") as f:
             f.write(onnx_model_str)
@@ -207,6 +220,16 @@ def main():
             params_file = ""
         else:
             params_file = os.path.join(args.model_dir, args.params_filename)
+
+        if args.external_filename is None:
+            args.external_filename = "external_data"
+
+        base_path = os.path.dirname(args.save_file)
+        if base_path and not os.path.exists(base_path):
+            os.mkdir(base_path)
+        external_file = os.path.join(base_path, args.external_filename)
+
+        calibration_file = args.save_calibration_file
         c_paddle_to_onnx(
             model_file=model_file,
             params_file=params_file,
@@ -217,7 +240,9 @@ def main():
             enable_onnx_checker=args.enable_onnx_checker,
             enable_experimental_op=True,
             enable_optimize=True,
-            deploy_backend=args.deploy_backend)
+            deploy_backend=args.deploy_backend,
+            calibration_file=calibration_file,
+            external_file=external_file)
         logging.info("===============Make PaddlePaddle Better!================")
         logging.info("A little survey: https://iwenjuan.baidu.com/?code=r8hu2s")
         return

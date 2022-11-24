@@ -39,6 +39,7 @@ class Mapper {
   bool export_as_custom_op = false;
   // [exported_op_name, domain]
   std::string custom_op_name;
+  std::string deploy_backend;
 
   P2OLogger Logger(const bool& verbose, const int32_t& opset_version = 100) {
     bool v = verbose;
@@ -51,7 +52,7 @@ class Mapper {
       output_name = op.outputs(0).arguments(0);
     }
     std::string op_type = op.type();
-    std::string prefix = "[Paddle2ONNX][" + op_type + ": " + output_name + "]";
+    std::string prefix = "[Paddle2ONNX] [" + op_type + ": " + output_name + "]";
     return P2OLogger(v, prefix);
   }
 
@@ -63,7 +64,7 @@ class Mapper {
     }
     std::string op_type = op.type();
     std::string prefix =
-        "[ERROR][Paddle2ONNX][" + op_type + ": " + output_name + "]";
+        "[ERROR][Paddle2ONNX] [" + op_type + ": " + output_name + "]";
     return P2OLogger(true, prefix);
   }
 
@@ -75,7 +76,7 @@ class Mapper {
     }
     std::string op_type = op.type();
     std::string prefix =
-        "[WARN][Paddle2ONNX][" + op_type + ": " + output_name + "]";
+        "[WARN][Paddle2ONNX] [" + op_type + ": " + output_name + "]";
     return P2OLogger(true, prefix);
   }
 
@@ -89,12 +90,14 @@ class Mapper {
   // if return value < 0, means the op is not supported.
   virtual int32_t GetMinOpset(bool verbose = false) { return 7; }
 
+  virtual bool IsExportAsCustomOp() { return export_as_custom_op; }
+
   void Run() {
     int32_t opset_version = helper_->GetOpsetVersion();
     Assert(opset_version >= 7 && opset_version <= MAX_ONNX_OPSET_VERSION,
            "[Paddle2ONNX] Only support opset_version in range of [7, " +
                std::to_string(MAX_ONNX_OPSET_VERSION) + "].");
-    if (export_as_custom_op) {
+    if (IsExportAsCustomOp()) {
       return ExportAsCustomOp();
     }
     if (opset_version == 16) {

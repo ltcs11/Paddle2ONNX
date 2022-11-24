@@ -251,8 +251,9 @@ class APIOnnx(object):
         make onnx res
         """
         sess = InferenceSession(
-            os.path.join(self.pwd, self.name, self.name + '_' + str(ver) +
-                         '.onnx'))
+            os.path.join(self.pwd, self.name,
+                         self.name + '_' + str(ver) + '.onnx'),
+            providers=['CPUExecutionProvider'])
         ort_outs = sess.run(output_names=None, input_feed=self.input_feed)
         return ort_outs
 
@@ -380,7 +381,7 @@ class APIOnnx(object):
                 for v in self._version:
                     onnx_model_str = c_p2o.export(model_file, params_file, v,
                                                   False, True, True, True, True,
-                                                  {}, "onnxruntime")
+                                                  {}, "onnxruntime", "", "")
                     with open(
                             os.path.join(self.name,
                                          self.name + '_' + str(v) + ".onnx"),
